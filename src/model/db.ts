@@ -6,10 +6,9 @@ import { Pool } from "pg";
 
 import { GameJSON } from "./jsonTypes";
 
-type StoreType = "pg" | "pg-deprecated" | "local";
+type StoreType = "pg" | "local";
 const storeUrlForType: Record<StoreType, string | undefined> = {
-  pg: process.env.DATABASE_URL_SUPABASE,
-  "pg-deprecated": process.env.DATABASE_URL_SUPABASE_OLD,
+  pg: process.env.POSTGRES_URL,
   local: process.env.DB_PATH,
 };
 if (Object.values(storeUrlForType).filter((x) => !!x).length === 0) {
@@ -18,7 +17,6 @@ if (Object.values(storeUrlForType).filter((x) => !!x).length === 0) {
 }
 const _instanceCache: Record<StoreType, IDb | null> = {
   pg: null,
-  "pg-deprecated": null,
   local: null,
 };
 
@@ -58,11 +56,7 @@ const getDbInstance = (preferredOrder: StoreType[]): IDb => {
   throw new Error("Unable to instantiate DB instance.");
 };
 
-const getDbForGameId = (gameId: string): IDb => {
-  return gameId.startsWith("v3:")
-    ? getDbInstance(["pg", "local"])
-    : getDbInstance(["pg", "local"]);
-};
+const getDb = (): IDb => getDbInstance(["pg", "local"]);
 
 interface IDb {
   createGamesTableIfNotExists(): Promise<void>;
@@ -82,8 +76,13 @@ class PgDb implements IDb {
   constructor(pgUrl: string) {
     this.pgUrl = pgUrl;
 
+    // pg lets `sslmode` in the URL override the `ssl` option below, which
+    // enforces cert verification and fails against Supabase's pooler cert.
+    const connectionString = pgUrl
+      .replace(/([?&])sslmode=[^&]*&?/, "$1")
+      .replace(/[?&]$/, "");
     const config: any = {
-      connectionString: this.pgUrl,
+      connectionString,
     };
     if (this.pgUrl.indexOf("localhost") === -1) {
       config.ssl = {
@@ -308,7 +307,7 @@ class SqliteDb implements IDb {
 export const getGameJSONById = async (
   gameId: string
 ): Promise<GameJSON | null> => {
-  const db = getDbForGameId(gameId);
+  const db = getDb();
   await db.createGamesTableIfNotExists();
   return db.getGameJSONById(gameId);
 };
@@ -316,7 +315,7 @@ export const getGameJSONById = async (
 export const getGameStateIdForGame = async (
   gameId: string
 ): Promise<string | null> => {
-  const db = getDbForGameId(gameId);
+  const db = getDb();
   await db.createGamesTableIfNotExists();
   return db.getGameStateIdForGame(gameId);
 };
@@ -332,7 +331,7 @@ export const saveGameJSONById = async (
   gameId: string,
   gameJSON: GameJSON
 ): Promise<void> => {
-  const db = getDbForGameId(gameId);
+  const db = getDb();
   await db.createGamesTableIfNotExists();
   return db.saveGame(gameId, JSON.stringify(gameJSON));
 };
